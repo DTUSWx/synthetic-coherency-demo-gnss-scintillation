@@ -9,15 +9,22 @@
 % 1) The same underlying propagated coherency state can produce different
 %    scalar receiver observables when measured through different receiver
 %    response matrices.
-% 2) Receiver de-embedding can recover receiver-normalized coherency
+% 2) Receiver de-embedding can recover receiver-de-embedded coherency
 %    quantities that agree across receivers.
 % 3) Basis-invariant quantities such as degree of polarization (DoP) and
 %    polarization entropy remain constant under unitary polarization
 %    rotation, but change under effective mixing / depolarization.
 %
+% Regimes
+% -------
+% Regime I   : baseline unitary trajectory
+% Regime II  : still unitary, but through a more receiver-sensitive
+%              polarization region
+% Regime III : mixing / depolarization
+%
 % Output
 % ------
-% A four-panel figure suitable as a draft Figure 4, plus publication-quality
+% A four-panel figure suitable as Figure 4, plus publication-quality
 % exports (PDF, PNG, EPS, SVG if supported, TIFF if supported, and MATLAB FIG)
 % in a subfolder located in the same folder as this script.
 %
@@ -28,7 +35,13 @@
 %   tracking-loop simulation.
 % - The script is self-contained and requires no toolboxes.
 %
-% Author: Tibor Durgonics / ChatGPT draft support
+% Publication note
+% ----------------
+% This figure is intended as a compact conceptual demonstration of
+% receiver dependence, de-embedding recovery, and invariant behavior.
+% It does not replace observational validation with calibrated
+% dual-polarization GNSS scintillation data.
+%
 % -------------------------------------------------------------------------
 
 clear; close all; clc;
@@ -43,9 +56,9 @@ winLen = 120;              % window length in samples for local scalar metrics
 smoothWin = 9;             % odd-length moving average for display smoothing
 
 % Regime boundaries
-idx1 = 1:400;              % Regime I: unitary rotation
-idx2 = 401:800;            % Regime II: same field viewed by different receivers
-idx3 = 801:1200;           % Regime III: mixing / depolarization
+idx1 = 1:400;              % Regime I
+idx2 = 401:800;            % Regime II
+idx3 = 801:1200;           % Regime III
 
 % Base total intensity
 S0_base = 1.0;
@@ -62,12 +75,21 @@ rng(42); % reproducibility
 %% -----------------------------
 % Plot styling defaults
 % -----------------------------
-lwMain = 1.9;
-lwAux  = 1.4;
-lwRef  = 2.2;
-fsAx   = 12;
-fsTit  = 13;
-fsLeg  = 10;
+fontName = 'Helvetica';
+
+lwMain  = 2.6;
+lwRef   = 2.3;
+lwAxis  = 1.2;
+lwXline = 1.2;
+
+fsTick = 15;   % tick labels
+fsAx   = 17;   % axis labels
+fsTit  = 18;   % panel titles
+fsLeg  = 13;   % legends
+fsAnn  = 13;   % in-panel annotations
+
+mkSmall = 7.0;
+mkMed   = 7.6;
 
 %% -----------------------------
 % Pauli matrices and helpers
@@ -77,7 +99,6 @@ sigma1 = [0 1; 1 0];
 sigma2 = [0 -1i; 1i 0];
 sigma3 = [1 0; 0 -1];
 
-% Anonymous helpers
 herm = @(X) 0.5 * (X + X');
 movavg = @(x,w) conv(x, ones(w,1)/w, 'same');
 
@@ -112,10 +133,9 @@ S0_series = S0_base * ( ...
     + 0.06*sin(2*pi*t/20) ...
     + 0.025*sin(2*pi*t/5) ...
     + 0.010*movavg(randn(N,1), 21) );
-
 S0_series = max(S0_series, 0.75);
 
-% Smooth correlated perturbations to avoid overly deterministic motion
+% Smooth correlated perturbations
 eta1 = movavg(randn(N,1), 31);
 eta2 = movavg(randn(N,1), 31);
 eta3 = movavg(randn(N,1), 31);
@@ -125,40 +145,50 @@ eta2 = eta2 / max(abs(eta2));
 eta3 = eta3 / max(abs(eta3));
 
 % -------------------------------------------------------------------------
-% Regimes I and II: unitary polarization evolution with constant DoP
-% We construct a smoothly evolving normalized Stokes vector p(t) with
-% nontrivial variation in all three components, then enforce |p| = DoP0.
+% Regime I: baseline unitary trajectory
 % -------------------------------------------------------------------------
-for k = [idx1 idx2]
-    th1 = 2*pi*(k-1)/250;
-    th2 = 2*pi*(k-1)/170 + 0.6;
+for k = idx1
+    th1 = 2*pi*(k-1)/280;
+    th2 = 2*pi*(k-1)/190 + 0.4;
 
     q = [ ...
-        0.58*cos(th1) + 0.10*eta1(k); ...
-        0.52*sin(th1) + 0.08*cos(th2) + 0.08*eta2(k); ...
-        0.38*sin(th2) + 0.10*cos(0.7*th1) + 0.06*eta3(k) ...
+        0.46*cos(th1) + 0.05*eta1(k); ...
+        0.40*sin(th1) + 0.05*cos(th2) + 0.04*eta2(k); ...
+        0.30*sin(th2) + 0.08*cos(0.7*th1) + 0.03*eta3(k) ...
         ];
 
-    % Enforce constant polarization purity in the unitary regime
-    qnorm = norm(q);
-    if qnorm < 1e-10
-        q = [DoP0; 0; 0];
-    else
-        q = DoP0 * q / qnorm;
-    end
+    q = DoP0 * q / max(norm(q), 1e-10);
 
     Svec = S0_series(k) * q;
     Jk = J_from_stokes(S0_series(k), Svec);
     Jout(:,:,k) = herm(Jk);
+    S_true(k,:) = stokes_from_J(Jout(:,:,k));
+end
 
-    S = stokes_from_J(Jout(:,:,k));
-    S_true(k,:) = S;
+% -------------------------------------------------------------------------
+% Regime II: still unitary, but through a more receiver-sensitive region
+% -------------------------------------------------------------------------
+for k = idx2
+    kk = k - idx2(1) + 1;
+    th1 = 2*pi*kk/180 + 0.8;
+    th2 = 2*pi*kk/130 + 1.1;
+
+    q = [ ...
+        0.72*cos(th1) + 0.05*eta1(k); ...
+        0.62*sin(th1) + 0.08*cos(th2) + 0.04*eta2(k); ...
+        0.12*sin(th2) + 0.05*cos(0.5*th1) + 0.03*eta3(k) ...
+        ];
+
+    q = DoP0 * q / max(norm(q), 1e-10);
+
+    Svec = S0_series(k) * q;
+    Jk = J_from_stokes(S0_series(k), Svec);
+    Jout(:,:,k) = herm(Jk);
+    S_true(k,:) = stokes_from_J(Jout(:,:,k));
 end
 
 % -------------------------------------------------------------------------
 % Regime III: effective mixing / depolarization
-% Mix two locally unitary states with distinct polarization states.
-% A smooth ramp is added at the boundary to avoid a hard transition.
 % -------------------------------------------------------------------------
 rampLen = 45;
 
@@ -184,13 +214,11 @@ for k = idx3
     J1 = J_from_stokes(S0_series(k), S0_series(k)*q1);
     J2 = J_from_stokes(S0_series(k), S0_series(k)*q2);
 
-    % Smoothly varying mixture weight with mild structured variability
     w = 0.55 + 0.22*sin(2*pi*(k-idx3(1))/220) + 0.08*eta1(k);
     w = min(max(w, 0.08), 0.92);
 
     Jmix = w*J1 + (1-w)*J2;
 
-    % Smooth transition into the mixing regime
     if k <= idx3(1) + rampLen - 1
         a = (k - idx3(1)) / max(rampLen-1,1);
         Jprev = Jout(:,:,idx3(1)-1);
@@ -200,9 +228,7 @@ for k = idx3
     end
 
     Jout(:,:,k) = herm(Jk);
-
-    S = stokes_from_J(Jout(:,:,k));
-    S_true(k,:) = S;
+    S_true(k,:) = stokes_from_J(Jout(:,:,k));
 end
 
 % Compute invariants of true Jout
@@ -226,15 +252,12 @@ end
 %% -----------------------------
 % Define two different receiver response matrices
 % -----------------------------
-% Receiver A: mild imbalance and cross-polar leakage
 PiA = [1.00, 0.08*exp(1i*0.30);
        0.05*exp(-1i*0.20), 0.92*exp(1i*0.10)];
 
-% Receiver B: stronger mixing / different gain-phase response
 PiB = [0.88*exp(1i*0.15), 0.14*exp(-1i*0.40);
        0.11*exp(1i*0.55), 1.05*exp(-1i*0.05)];
 
-% Noise covariance matrices
 NA = [noisePowA, 0.0015*exp(1i*0.2);
       0.0015*exp(-1i*0.2), noisePowA];
 
@@ -247,7 +270,6 @@ NB = [noisePowB, 0.0020*exp(-1i*0.4);
 RyA = zeros(2,2,N);
 RyB = zeros(2,2,N);
 
-% Common scalar weighting alpha(t)^2 to mimic correlator-level nuisance scaling
 alpha2 = 1 + 0.05*sin(2*pi*t/9) + 0.01*randn(N,1);
 alpha2 = max(alpha2, 0.8);
 
@@ -259,11 +281,9 @@ end
 %% -----------------------------
 % Scalar receiver observables
 % -----------------------------
-% Use channel-1 power as a legacy-like single-channel intensity observable
 PA = squeeze(real(RyA(1,1,:)));
 PB = squeeze(real(RyB(1,1,:)));
 
-% Local S4-like proxy over a sliding window
 S4A = nan(N,1);
 S4B = nan(N,1);
 
@@ -285,7 +305,6 @@ for k = 1:N
     end
 end
 
-% Smooth only for display
 S4A_plot = movavg(S4A, smoothWin);
 S4B_plot = movavg(S4B, smoothWin);
 
@@ -300,7 +319,6 @@ for k = 1:N
     JhatB(:,:,k) = herm(PiB \ (RyB(:,:,k) - NB) / PiB');
 end
 
-% Recovered invariants
 S0hatA = zeros(N,1); S0hatB = zeros(N,1);
 DoPhatA = zeros(N,1); DoPhatB = zeros(N,1);
 HhatA   = zeros(N,1); HhatB   = zeros(N,1);
@@ -319,21 +337,21 @@ for k = 1:N
     HhatB(k) = hpol_from_J(JB);
 end
 
-% Smooth only for display
-S0_true_plot = movavg(S0_true, smoothWin);
-DoP_true_plot = movavg(DoP_true, smoothWin);
+% Smoothed display quantities
+S0_true_plot   = movavg(S0_true, smoothWin);
+DoP_true_plot  = movavg(DoP_true, smoothWin);
 Hpol_true_plot = movavg(Hpol_true, smoothWin);
 
 p1_plot = movavg(p_true(:,1), smoothWin);
 p2_plot = movavg(p_true(:,2), smoothWin);
 p3_plot = movavg(p_true(:,3), smoothWin);
 
-S0hatA_plot = movavg(S0hatA, smoothWin);
-S0hatB_plot = movavg(S0hatB, smoothWin);
+S0hatA_plot  = movavg(S0hatA, smoothWin);
+S0hatB_plot  = movavg(S0hatB, smoothWin);
 DoPhatA_plot = movavg(DoPhatA, smoothWin);
 DoPhatB_plot = movavg(DoPhatB, smoothWin);
-HhatA_plot   = movavg(HhatA,   smoothWin);
-HhatB_plot   = movavg(HhatB,   smoothWin);
+HhatA_plot   = movavg(HhatA, smoothWin);
+HhatB_plot   = movavg(HhatB, smoothWin);
 
 %% -----------------------------
 % Useful diagnostics for caption / text
@@ -347,147 +365,184 @@ HRecErrA_rms = sqrt(mean((HhatA - Hpol_true).^2));
 HRecErrB_rms = sqrt(mean((HhatB - Hpol_true).^2));
 
 %% -----------------------------
-% Plot Figure 4
+% Figure creation
 % -----------------------------
-figH = figure('Units','pixels','Position',[80 80 1420 900], 'Color','w');
+figH = figure('Color','w', ...
+              'Units','inches', ...
+              'Position',[0.4 0.4 16.0 10.6], ...
+              'PaperPositionMode','auto', ...
+              'InvertHardcopy','off');
+
+tlo = tiledlayout(figH,2,2,'TileSpacing','compact','Padding','compact');
 
 x1 = t(idx1(end));
 x2 = t(idx2(end));
 
-tiledlayout(2,2,'TileSpacing','compact','Padding','compact');
+% Marker locations used only in panel (d)
+mkD_A = 8:45:N;
+mkD_B = 28:45:N;
 
-% -------------------------------------------------------------------------
-% Panel (a): normalized Stokes evolution
-% -------------------------------------------------------------------------
-nexttile;
+%% -----------------------------
+% Panel (a)
+% -----------------------------
+ax1 = nexttile(tlo,1);
 plot(t, p1_plot, 'LineWidth', lwMain); hold on;
 plot(t, p2_plot, 'LineWidth', lwMain);
 plot(t, p3_plot, 'LineWidth', lwMain);
-xline(x1, '--k', 'LineWidth', 1.0);
-xline(x2, '--k', 'LineWidth', 1.0);
-xlabel('Time (s)', 'FontSize', fsAx);
-ylabel('Normalized Stokes components', 'FontSize', fsAx);
-title('(a) Synthetic propagated coherency state', 'FontSize', fsTit, 'FontWeight','bold');
-legend('p_1','p_2','p_3', 'Location','northeast', 'FontSize', fsLeg, 'Box','off');
+xline(x1, '--k', 'LineWidth', lwXline);
+xline(x2, '--k', 'LineWidth', lwXline);
+xlabel('Time (s)', 'FontSize', fsAx, 'FontName', fontName);
+ylabel('Normalized Stokes components', 'FontSize', fsAx, 'FontName', fontName);
+title('(a) Synthetic propagated coherency state', 'FontSize', fsTit, ...
+    'FontWeight','bold', 'FontName', fontName);
+legend('p_1','p_2','p_3', 'Location','southeast', 'FontSize', fsLeg, ...
+    'Box','off', 'FontName', fontName);
 grid on; box on;
-set(gca, 'FontSize', fsAx);
-ylim([-0.8 0.9]);
+set(ax1, 'FontSize', fsTick, 'LineWidth', lwAxis, 'FontName', fontName);
+ylim([-0.85 0.85]);
 
-yl = ylim;
-yr = yl(2) - yl(1);
-text(mean(t(idx1)), yl(2)-0.08*yr, 'Unitary rotation', ...
-    'HorizontalAlignment','center', 'FontSize', fsLeg, ...
-    'FontWeight','bold', 'BackgroundColor','w', 'Margin',1);
-text(mean(t(idx2)), yl(2)-0.08*yr, 'Same field,\newline different receivers', ...
-    'HorizontalAlignment','center', 'FontSize', fsLeg, ...
-    'FontWeight','bold', 'BackgroundColor','w', 'Margin',1);
-text(mean(t(idx3)), yl(2)-0.08*yr, 'Mixing /\newline depolarization', ...
-    'HorizontalAlignment','center', 'FontSize', fsLeg, ...
-    'FontWeight','bold', 'BackgroundColor','w', 'Margin',1);
+yl = ylim; yr = yl(2)-yl(1);
+text(mean(t(idx1)), yl(2)-0.12*yr, 'I: unitary', ...
+    'HorizontalAlignment','center', 'FontSize', fsAnn, ...
+    'FontWeight','bold', 'FontName', fontName, ...
+    'BackgroundColor','w', 'Margin',1.5);
+text(mean(t(idx2)), yl(2)-0.12*yr, 'II: proj.-sensitive', ...
+    'HorizontalAlignment','center', 'FontSize', fsAnn, ...
+    'FontWeight','bold', 'FontName', fontName, ...
+    'BackgroundColor','w', 'Margin',1.5);
+text(mean(t(idx3)), yl(2)-0.12*yr, 'III: mixing', ...
+    'HorizontalAlignment','center', 'FontSize', fsAnn, ...
+    'FontWeight','bold', 'FontName', fontName, ...
+    'BackgroundColor','w', 'Margin',1.5);
 
-% -------------------------------------------------------------------------
-% Panel (b): receiver-dependent scalar observables
-% -------------------------------------------------------------------------
-nexttile;
+%% -----------------------------
+% Panel (b)
+% -----------------------------
+ax2 = nexttile(tlo,2);
 plot(t, S4A_plot, 'LineWidth', lwMain); hold on;
 plot(t, S4B_plot, 'LineWidth', lwMain);
-xline(x1, '--k', 'LineWidth', 1.0);
-xline(x2, '--k', 'LineWidth', 1.0);
-xlabel('Time (s)', 'FontSize', fsAx);
-ylabel('Windowed scalar S_4 proxy', 'FontSize', fsAx);
-title('(b) Receiver-dependent scalar observables', 'FontSize', fsTit, 'FontWeight','bold');
-legend('Receiver A','Receiver B', 'Location','northwest', 'FontSize', fsLeg, 'Box','off');
+xline(x1, '--k', 'LineWidth', lwXline);
+xline(x2, '--k', 'LineWidth', lwXline);
+xlabel('Time (s)', 'FontSize', fsAx, 'FontName', fontName);
+ylabel('Windowed scalar S_4 proxy', 'FontSize', fsAx, 'FontName', fontName);
+title('(b) Receiver-dependent scalar observables', 'FontSize', fsTit, ...
+    'FontWeight','bold', 'FontName', fontName);
+legend('Receiver A','Receiver B', 'Location','northwest', 'FontSize', fsLeg, ...
+    'Box','off', 'FontName', fontName);
 grid on; box on;
-set(gca, 'FontSize', fsAx);
+set(ax2, 'FontSize', fsTick, 'LineWidth', lwAxis, 'FontName', fontName);
 
-yl = ylim;
-yr = yl(2)-yl(1);
-text(t(35), yl(2)-0.10*yr, sprintf('mean |\\Delta| = %.3f', scalarMismatch_mean), ...
-    'FontSize', fsLeg, 'BackgroundColor','w', 'Margin',1);
+yl = ylim; yr = yl(2)-yl(1);
+text(t(48), yl(2)-0.08*yr, sprintf('mean |\\Delta| = %.3f', scalarMismatch_mean), ...
+    'FontSize', fsAnn, 'FontName', fontName, ...
+    'BackgroundColor','w', 'Margin',1.5);
 
-% -------------------------------------------------------------------------
-% Panel (c): de-embedded receiver-normalized intensity recovery
-% -------------------------------------------------------------------------
-nexttile;
+%% -----------------------------
+% Panel (c)
+% -----------------------------
+ax3 = nexttile(tlo,3);
 plot(t, S0_true_plot, 'k-', 'LineWidth', lwRef); hold on;
-plot(t, S0hatA_plot, '--', 'LineWidth', lwMain);
-plot(t, S0hatB_plot, ':',  'LineWidth', lwRef-0.3);
-xline(x1, '--k', 'LineWidth', 1.0);
-xline(x2, '--k', 'LineWidth', 1.0);
-xlabel('Time (s)', 'FontSize', fsAx);
-ylabel('Intensity / tr(J)', 'FontSize', fsAx);
-title('(c) De-embedded receiver-normalized recovery', 'FontSize', fsTit, 'FontWeight','bold');
+plot(t, S0hatA_plot, '--', 'LineWidth', lwMain, 'Color', [0 0.4470 0.7410]);
+plot(t, S0hatB_plot, ':',  'LineWidth', lwMain, 'Color', [0.8500 0.3250 0.0980]);
+
+xline(x1, '--k', 'LineWidth', lwXline);
+xline(x2, '--k', 'LineWidth', lwXline);
+
+xlabel('Time (s)', 'FontSize', fsAx, 'FontName', fontName);
+ylabel('Intensity / tr(J)', 'FontSize', fsAx, 'FontName', fontName);
+title('(c) Receiver-de-embedded intensity recovery', 'FontSize', fsTit, ...
+    'FontWeight','bold', 'FontName', fontName);
 legend('True tr(J_{out})','Recovered A','Recovered B', ...
-    'Location','southwest', 'FontSize', fsLeg, 'Box','off');
+    'Location','northwest', 'FontSize', fsLeg, 'Box','off', ...
+    'FontName', fontName);
 grid on; box on;
-set(gca, 'FontSize', fsAx);
+set(ax3, 'FontSize', fsTick, 'LineWidth', lwAxis, 'FontName', fontName);
+ylim([0.8 1.2]);
 
-allY = [S0_true_plot; S0hatA_plot; S0hatB_plot];
-ymin = min(allY) - 0.03;
-ymax = max(allY) + 0.03;
-ylim([ymin ymax]);
-
-yl = ylim;
-yr = yl(2)-yl(1);
-text(t(35), yl(2)-0.10*yr, ...
+yl = ylim; yr = yl(2)-yl(1);
+text(t(8), yl(1)+0.06*yr, ...
     sprintf('RMSE(A)=%.3f, RMSE(B)=%.3f', recoveryErrA_rms, recoveryErrB_rms), ...
-    'FontSize', fsLeg, 'BackgroundColor','w', 'Margin',1);
+    'FontSize', fsAnn, 'FontName', fontName, ...
+    'BackgroundColor','w', 'Margin',1.5);
 
-% -------------------------------------------------------------------------
-% Panel (d): invariant diagnostics, true and recovered
-% -------------------------------------------------------------------------
-nexttile;
+%% -----------------------------
+% Panel (d)
+% -----------------------------
+ax4 = nexttile(tlo,4);
 
-yyaxis left;
-plot(t, DoP_true_plot, 'k-', 'LineWidth', lwRef); hold on;
-plot(t, DoPhatA_plot, '--', 'LineWidth', lwMain);
-plot(t, DoPhatB_plot, ':', 'LineWidth', lwRef-0.3);
-ylabel('DoP', 'FontSize', fsAx);
+yyaxis left
+hDoPtrue = plot(t, DoP_true_plot, '-', ...
+    'Color', [0 0 0], 'LineWidth', lwRef); hold on;
+
+hDoPA = plot(t(mkD_A), DoPhatA_plot(mkD_A), 'o', ...
+    'MarkerSize', mkMed, ...
+    'LineStyle', 'none', ...
+    'MarkerFaceColor', [0 0.4470 0.7410], ...
+    'MarkerEdgeColor', [0 0.4470 0.7410]);
+
+hDoPB = plot(t(mkD_B), DoPhatB_plot(mkD_B), 's', ...
+    'MarkerSize', mkSmall, ...
+    'LineStyle', 'none', ...
+    'MarkerFaceColor', [0.3010 0.7450 0.9330], ...
+    'MarkerEdgeColor', [0.3010 0.7450 0.9330]);
+
+ylabel('DoP', 'FontSize', fsAx, 'Color', [0 0.4470 0.7410], 'FontName', fontName);
 ylim([0.1 0.95]);
+ax4.YColor = [0 0.4470 0.7410];
 
-yyaxis right;
-plot(t, Hpol_true_plot, 'k-', 'LineWidth', lwRef);
-plot(t, HhatA_plot, '--', 'LineWidth', lwMain);
-plot(t, HhatB_plot, ':', 'LineWidth', lwRef-0.3);
-ylabel('H_{pol}', 'FontSize', fsAx);
+yyaxis right
+hHtrue = plot(t, Hpol_true_plot, '-', ...
+    'Color', [0.35 0.35 0.35], 'LineWidth', lwRef); hold on;
 
-xline(x1, '--k', 'LineWidth', 1.0);
-xline(x2, '--k', 'LineWidth', 1.0);
-xlabel('Time (s)', 'FontSize', fsAx);
-title('(d) Invariant diagnostics: true and recovered', 'FontSize', fsTit, 'FontWeight','bold');
+hHA = plot(t(mkD_A), HhatA_plot(mkD_A), '^', ...
+    'MarkerSize', mkMed, ...
+    'LineStyle', 'none', ...
+    'MarkerFaceColor', [0.8500 0.3250 0.0980], ...
+    'MarkerEdgeColor', [0.8500 0.3250 0.0980]);
+
+hHB = plot(t(mkD_B), HhatB_plot(mkD_B), 'd', ...
+    'MarkerSize', mkSmall, ...
+    'LineStyle', 'none', ...
+    'MarkerFaceColor', [0.9290 0.6940 0.1250], ...
+    'MarkerEdgeColor', [0.9290 0.6940 0.1250]);
+
+ylabel('H_{pol}', 'FontSize', fsAx, 'Color', [0.8500 0.3250 0.0980], 'FontName', fontName);
+ax4.YColor = [0.8500 0.3250 0.0980];
+ylim([0.1 0.8]);
+
+xline(x1, '--k', 'LineWidth', lwXline);
+xline(x2, '--k', 'LineWidth', lwXline);
+xlabel('Time (s)', 'FontSize', fsAx, 'FontName', fontName);
+title('(d) Invariant diagnostics: true and recovered', 'FontSize', fsTit, ...
+    'FontWeight','bold', 'FontName', fontName);
 grid on; box on;
-set(gca, 'FontSize', fsAx);
+set(ax4, 'FontSize', fsTick, 'LineWidth', lwAxis, 'FontName', fontName);
 
-legend({'DoP true','DoP A','DoP B','H true','H A','H B'}, ...
-    'Location','southwest', 'FontSize', fsLeg, 'Box','off');
-
-yyaxis left;
-yl = ylim;
-yr = yl(2)-yl(1);
-text(t(35), yl(2)-0.10*yr, ...
-    sprintf('DoP RMSE(A)=%.3f, DoP RMSE(B)=%.3f', DoPRecErrA_rms, DoPRecErrB_rms), ...
-    'FontSize', fsLeg, 'BackgroundColor','w', 'Margin',1);
+legend([hDoPtrue, hDoPA, hDoPB, hHtrue, hHA, hHB], ...
+    {'DoP true','DoP A','DoP B','H true','H A','H B'}, ...
+    'Location','southoutside', 'NumColumns', 3, ...
+    'FontSize', fsLeg, 'Box','off', 'FontName', fontName);
 
 %% -----------------------------
 % Optional console summary
 % -----------------------------
 fprintf('Synthetic experiment completed.\n');
-fprintf('Regime I-II: unitary rotation, invariants should remain approximately constant.\n');
-fprintf('Regime III: mixing/depolarization, DoP should decrease and H_pol should increase.\n');
-fprintf('Receiver A and B produce different scalar metrics, but de-embedded tr(J) should agree.\n');
+fprintf('Regime I  : baseline unitary evolution.\n');
+fprintf('Regime II : still unitary, but more receiver-sensitive.\n');
+fprintf('Regime III: mixing / depolarization.\n');
+fprintf('Receiver A and B produce different scalar metrics, but de-embedded tr(J) should agree closely.\n');
 fprintf('RMSE tr(J): A = %.5f, B = %.5f\n', recoveryErrA_rms, recoveryErrB_rms);
 fprintf('RMSE DoP : A = %.5f, B = %.5f\n', DoPRecErrA_rms, DoPRecErrB_rms);
 fprintf('RMSE Hpol: A = %.5f, B = %.5f\n', HRecErrA_rms, HRecErrB_rms);
 
 %% -----------------------------
-% Save figure and synthetic data in publication-quality formats
+% Save figure and synthetic data
 % -----------------------------
 scriptFullPath = mfilename('fullpath');
 if isempty(scriptFullPath)
     scriptDir = pwd;
-    scriptBaseName = 'synthetic_coherency_demo';
 else
-    [scriptDir, scriptBaseName, ~] = fileparts(scriptFullPath);
+    [scriptDir, ~, ~] = fileparts(scriptFullPath);
 end
 
 outDir = fullfile(scriptDir, 'output_figure4');
@@ -495,14 +550,14 @@ if ~exist(outDir, 'dir')
     mkdir(outDir);
 end
 
-set(figH, 'Color', 'w');
-
 figBase = fullfile(outDir, 'Figure4_synthetic_coherency_demo');
 
-% Save editable MATLAB figure
+set(figH, 'Color', 'w');
+drawnow;
+pause(0.3);
+
 savefig(figH, [figBase '.fig']);
 
-% Save synthetic data and diagnostics
 save([figBase '_data.mat'], ...
     't', 'dt', 'N', 'winLen', 'smoothWin', ...
     'idx1', 'idx2', 'idx3', ...
@@ -517,35 +572,44 @@ save([figBase '_data.mat'], ...
 
 pngRes = 600;
 
-% Preferred export path
 try
-    exportgraphics(figH, [figBase '.pdf'], 'ContentType', 'vector');
-    exportgraphics(figH, [figBase '.png'], 'Resolution', pngRes);
+    exportgraphics(figH, [figBase '.pdf'], ...
+        'ContentType', 'vector', ...
+        'BackgroundColor', 'white');
 catch ME
-    warning('exportgraphics failed: %s\nFalling back to print.', ME.message);
-    print(figH, [figBase '.pdf'], '-dpdf', '-painters');
-    print(figH, [figBase '.png'], '-dpng', sprintf('-r%d', pngRes));
+    warning('PDF export failed: %s', ME.message);
 end
 
-% EPS export
 try
+    set(figH, 'Renderer', 'painters');
+    drawnow; pause(0.3);
     print(figH, [figBase '.eps'], '-depsc2', '-painters');
 catch ME
     warning('EPS export failed: %s', ME.message);
 end
 
-% SVG export
 try
-    exportgraphics(figH, [figBase '.svg'], 'ContentType', 'vector');
+    set(figH, 'Renderer', 'opengl');
+    drawnow; pause(0.3);
+    print(figH, [figBase '.png'], '-dpng', sprintf('-r%d', pngRes));
 catch ME
-    warning('SVG export not available or failed: %s', ME.message);
+    warning('PNG export failed: %s', ME.message);
 end
 
-% TIFF export
 try
+    set(figH, 'Renderer', 'opengl');
+    drawnow; pause(0.3);
     print(figH, [figBase '.tif'], '-dtiff', sprintf('-r%d', pngRes));
 catch ME
     warning('TIFF export failed: %s', ME.message);
+end
+
+try
+    exportgraphics(figH, [figBase '.svg'], ...
+        'ContentType', 'vector', ...
+        'BackgroundColor', 'white');
+catch ME
+    warning('SVG export not available or failed: %s', ME.message);
 end
 
 fprintf('\nSaved outputs to:\n%s\n', outDir);
