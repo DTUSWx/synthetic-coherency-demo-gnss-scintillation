@@ -75,6 +75,8 @@ rng(42); % reproducibility
 %% -----------------------------
 % Plot styling defaults
 % -----------------------------
+% These values were increased so that Figure 4 better matches the apparent
+% font scale used in Figure 5 and remains legible after journal reduction.
 fontName = 'Helvetica';
 
 lwMain  = 2.6;
@@ -82,14 +84,14 @@ lwRef   = 2.3;
 lwAxis  = 1.2;
 lwXline = 1.2;
 
-fsTick = 15;   % tick labels
-fsAx   = 17;   % axis labels
-fsTit  = 18;   % panel titles
-fsLeg  = 13;   % legends
-fsAnn  = 13;   % in-panel annotations
+fsTick = 17;   % tick labels
+fsAx   = 19;   % axis labels
+fsTit  = 20;   % panel titles
+fsLeg  = 15;   % legends
+fsAnn  = 15;   % in-panel annotations
 
-mkSmall = 7.0;
-mkMed   = 7.6;
+mkSmall = 8.0;
+mkMed   = 8.8;
 
 %% -----------------------------
 % Pauli matrices and helpers
@@ -99,7 +101,10 @@ sigma1 = [0 1; 1 0];
 sigma2 = [0 -1i; 1i 0];
 sigma3 = [1 0; 0 -1];
 
+% Hermitian symmetrization helper
 herm = @(X) 0.5 * (X + X');
+
+% Simple moving average helper for plotting
 movavg = @(x,w) conv(x, ones(w,1)/w, 'same');
 
 % Build coherency from Stokes parameters
@@ -121,6 +126,9 @@ hpol_from_J = @(J) local_hpol_from_J(J);
 %% -----------------------------
 % Construct synthetic propagated coherency state J_out(t)
 % -----------------------------
+% The synthetic trajectory is prescribed directly at the coherency level.
+% This keeps the demonstration focused on the measurement framework rather
+% than on detailed receiver tracking-loop simulation.
 Jout = zeros(2,2,N);
 S0_true = zeros(N,1);
 DoP_true = zeros(N,1);
@@ -190,6 +198,9 @@ end
 % -------------------------------------------------------------------------
 % Regime III: effective mixing / depolarization
 % -------------------------------------------------------------------------
+% In this regime the state is generated as a convex mixture of two locally
+% unitary states, providing a controlled synthetic example of reduced DoP
+% and increased polarization entropy.
 rampLen = 45;
 
 for k = idx3
@@ -252,6 +263,9 @@ end
 %% -----------------------------
 % Define two different receiver response matrices
 % -----------------------------
+% These two matrices intentionally represent distinct but well-behaved
+% receiver mappings so that scalar observables differ while de-embedded
+% second-order quantities can still be compared.
 PiA = [1.00, 0.08*exp(1i*0.30);
        0.05*exp(-1i*0.20), 0.92*exp(1i*0.10)];
 
@@ -267,6 +281,9 @@ NB = [noisePowB, 0.0020*exp(-1i*0.4);
 %% -----------------------------
 % Generate receiver covariance matrices
 % -----------------------------
+% A mild common scalar modulation alpha^2 is included to mimic benign
+% common-mode effects that rescale covariance without erasing its
+% underlying cross-structure.
 RyA = zeros(2,2,N);
 RyB = zeros(2,2,N);
 
@@ -281,6 +298,8 @@ end
 %% -----------------------------
 % Scalar receiver observables
 % -----------------------------
+% The scalar proxy uses a single receiver-channel power observable and is
+% included specifically to illustrate receiver dependence.
 PA = squeeze(real(RyA(1,1,:)));
 PB = squeeze(real(RyB(1,1,:)));
 
@@ -311,6 +330,8 @@ S4B_plot = movavg(S4B, smoothWin);
 %% -----------------------------
 % De-embedding
 % -----------------------------
+% This is the core model-based inversion step used to recover a
+% receiver-de-embedded estimate of the propagated coherency state.
 JhatA = zeros(2,2,N);
 JhatB = zeros(2,2,N);
 
@@ -383,7 +404,7 @@ mkD_A = 8:45:N;
 mkD_B = 28:45:N;
 
 %% -----------------------------
-% Panel (a)
+% Panel (a): propagated coherency trajectory in normalized Stokes space
 % -----------------------------
 ax1 = nexttile(tlo,1);
 plot(t, p1_plot, 'LineWidth', lwMain); hold on;
@@ -416,7 +437,7 @@ text(mean(t(idx3)), yl(2)-0.12*yr, 'III: mixing', ...
     'BackgroundColor','w', 'Margin',1.5);
 
 %% -----------------------------
-% Panel (b)
+% Panel (b): receiver-dependent scalar observables
 % -----------------------------
 ax2 = nexttile(tlo,2);
 plot(t, S4A_plot, 'LineWidth', lwMain); hold on;
@@ -438,7 +459,7 @@ text(t(48), yl(2)-0.08*yr, sprintf('mean |\\Delta| = %.3f', scalarMismatch_mean)
     'BackgroundColor','w', 'Margin',1.5);
 
 %% -----------------------------
-% Panel (c)
+% Panel (c): de-embedded intensity recovery
 % -----------------------------
 ax3 = nexttile(tlo,3);
 plot(t, S0_true_plot, 'k-', 'LineWidth', lwRef); hold on;
@@ -466,7 +487,7 @@ text(t(8), yl(1)+0.06*yr, ...
     'BackgroundColor','w', 'Margin',1.5);
 
 %% -----------------------------
-% Panel (d)
+% Panel (d): invariant diagnostics, true versus recovered
 % -----------------------------
 ax4 = nexttile(tlo,4);
 
@@ -626,6 +647,7 @@ fprintf('  %s_data.mat\n\n', figBase);
 % Local function
 % -----------------------------
 function H = local_hpol_from_J(J)
+    % Compute polarization entropy from a Hermitian coherency matrix.
     ev = real(eig(0.5*(J + J')));
     ev = max(ev, 0);
     s = sum(ev);
